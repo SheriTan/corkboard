@@ -1,5 +1,5 @@
 import './App.css';
-import {useState, useEffect} from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
 // pages
@@ -13,10 +13,10 @@ import SetDocumentTitle from './utils/SetDocumentTitle';
 
 
 
-export default function App() {
-  const url = process.env.REACT_APP_API_URL;
-  const region = process.env.REACT_APP_AWS_REGION;
-  
+export default function App({url}) {
+
+  const mounted = useRef();
+
   const titles = {
     '/': 'Welcome to Corkboard',
     '/home': 'Home',
@@ -24,21 +24,28 @@ export default function App() {
     '/profile': 'Profile'
   }
 
-  useEffect(()=>{
+  useEffect(() => {
+    console.log(mounted.current)
+
+    // if (!mounted.current) {
+    //   console.log(url + `auth?region=${region}&paramName=cognito`)
+    //   mounted.current = true;
+    // }
+
   }, [])
-  
+
   return (
     <Router>
       <SetDocumentTitle titles={titles} />
       <Routes>
-        <Route accessType = 'public'>
-          <Route path = '/' element={<Landing/>} />
+        <Route accessType='public'>
+          <Route path='/' element={<Landing />} />
         </Route>
 
-        <Route accessType = 'private'>
-          <Route path = '/home' element={<Home />} />
-          <Route path = '/follow' element={<Follow />} />
-          <Route path = '/profile' element={<Profile />} />
+        <Route accessType='private'>
+          <Route path='/home' element={<Home />} />
+          <Route path='/follow' element={<Follow />} />
+          <Route path='/profile' element={<Profile />} />
         </Route>
       </Routes>
     </Router>
