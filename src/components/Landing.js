@@ -1,23 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { Button, TextField, FormControl, Input, InputAdornment, IconButton, InputLabel, FormHelperText, FormControlLabel, Checkbox } from '@mui/material';
+import { QRCodeSVG } from 'qrcode.react';
+import { Button, TextField, FormControl, Input, InputAdornment, IconButton, InputLabel, FormHelperText } from '@mui/material';
 import { Visibility, VisibilityOff } from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
+import { InputChecker } from '../utils/InputChecker';
+import { resendCode, userResetPassword, userResetPasswordConfirmation, userSignIn, userSignInConfirmation, userSignUp, userSignUpConfirmation } from '../utils/AmplifyHandler';
 import InvalidPage from '../utils/InvalidPage';
 
-
-const Landing = () => {
-    const navigate = useNavigate();
+const Landing = ({ authProps }) => {
     // 1 : Registration / Login
     // 2 : Confirmation
-    // 3 : MFA Setup / Verification
-    // 4 : Profile Setup
-    // 5 : Forgot Password
+    // 3 : TOTP Setup / Verification
+    // 4 : Forgot Password
     const [step, setStep] = useState(1);
 
     // Toggle Password Visbility
     const [showPassword, setShowPassword] = useState({
         register: false,
-        confirm: false,
+        registerConfirm: false,
         login: false,
         reset: false,
         resetConfirm: false
@@ -29,12 +28,9 @@ const Landing = () => {
         password: '',
         confirmPassword: '',
         code: '',
-        firstName: '',
-        lastName: '',
         role: '',
-        isSubmitted: false,
-        isCodeSubmitted: false,
-        errorMsg: ''
+        isFormSubmitted: false,
+        isCodeSubmitted: false
     });
 
     // Login Form
@@ -42,9 +38,10 @@ const Landing = () => {
         email: '',
         password: '',
         code: '',
-        isSubmitted: false,
-        isCodeSubmitted: false,
-        errorMsg: ''
+        nextStep: '',
+        setupURI: '',
+        isFormSubmitted: false,
+        isTOTPSubmitted: false
     });
 
     // Forgot Password Form
@@ -53,24 +50,281 @@ const Landing = () => {
         code: '',
         password: '',
         confirmPassword: '',
-        isEmailSubmitted: false,
-        isCodeSubmitted: false,
-        isSubmitted: false,
-        errorMsg: ''
-    })
+        isFormSubmitted: false,
+        isResetSubmitted: false
+    });
+
+    const [errorMsg, setErrorMsg] = useState({
+        register: '',
+        login: '',
+        forgot: ''
+    });
 
     // Invalid Input Messages
     const [validationOutcome, setValidationOutcome] = useState({
         reg_email: {},
         reg_password: {},
+        reg_code: {},
         log_email: {},
         log_password: {},
+        log_code: {},
         fgt_email: {},
-        fgt_password: {}
+        fgt_password: {},
+        fgt_code: {}
     })
 
+    useEffect(() => {
+        setValidationOutcome({
+            reg_email: InputChecker("Email", [registerField.email]),
+            reg_password: InputChecker("Confirm Password", [registerField.password, registerField.confirmPassword]),
+            reg_code: InputChecker("Code", [registerField.code]),
+            log_email: InputChecker("Email", [loginField.email]),
+            log_password: InputChecker("Password", [loginField.password]),
+            log_code: InputChecker("Code", [loginField.code]),
+            fgt_email: InputChecker("Email", [forgotField.email]),
+            fgt_password: InputChecker("Confirm Password", [forgotField.password, forgotField.confirmPassword]),
+            fgt_code: InputChecker("Code", [forgotField.code])
+        });
+    }, [registerField, loginField, forgotField])
+
+    // Step 1: Registration
+    const handleRegister = async (e) => {
+        e.preventDefault();
+
+        // Clear Login + Forgot Fields
+        handleClearFields(['login', 'forgot']);
+        setRegisterField((prevState) => ({
+            ...prevState,
+            isFormSubmitted: true
+        }))
+        let customMsg = '';
+
+        // Check for role
+        if (registerField.role === '' || registerField.role === null || registerField.role === undefined) {
+            customMsg = 'Please select a role type';
+        } else {
+            const validCount = handleValidCounter('reg');
+            if (validCount === 2) {
+                let defaultName = registerField.email.split('@')[0];
+                if (defaultName.length > 64) {
+                    customMsg = 'This email address is too long. Please provide another email address.';
+                } else {
+                    const response = await userSignUp([registerField.email, registerField.password, defaultName, registerField.role]);
+                    if (response.success) {
+                        // Clear error message (if any)
+                        setErrorMsg(prevState => ({
+                            ...prevState,
+                            register: ''
+                        }));
+                        // Go to Account Confirmation
+                        handleLandingNav('confirmation');
+                    } else {
+                        customMsg = response.message;
+                    }
+                }
+            }
+        }
+        if (customMsg !== '' && customMsg !== null && customMsg !== undefined) {
+            setErrorMsg(prevState => ({
+                ...prevState,
+                register: customMsg
+            }));
+        }
+    }
+
+    // Step 1: Login
+    const handleLogin = async (e) => {
+        e.preventDefault();
+
+        // Clear Register + Forgot Fields
+        handleClearFields(['register', 'forgot']);
+        setLoginField((prevState) => ({
+            ...prevState,
+            isFormSubmitted: true
+        }))
+
+        const validCount = handleValidCounter('log');
+        if (validCount == 2) {
+            const response = await userSignIn([loginField.email, loginField.password]);
+            if (response.success) {
+                if (response.body.nextStep.signInStep === 'CONTINUE_SIGN_IN_WITH_TOTP_SETUP') {
+                    const setupURI = response.body.nextStep.totpSetupDetails.getSetupUri('corkboard_app');
+                    //loginField.setupURI = setupURI.href;
+                    setLoginField(prevState => ({
+                        ...prevState,
+                        setupURI: setupURI.href
+                    }))
+                }
+                // Clear error message (if any)
+                setErrorMsg(prevState => ({
+                    ...prevState,
+                    login: ''
+                }));
+                setLoginField(prevState => ({
+                    ...prevState,
+                    nextStep: response.body.nextStep.signInStep,
+                }));
+                // Go to Setup / Verify TOTP
+                handleLandingNav('totp');
+            } else {
+                setErrorMsg(prevState => ({
+                    ...prevState,
+                    login: response.message
+                }))
+            }
+        }
+    }
+
+    // Step 2: Confirmation
+    const handleConfirmation = async (e, type) => {
+        e.preventDefault();
+        let customMsg = '';
+        if (type === 'register') { // [1] Account Confirmation
+            const { email, code } = registerField;
+
+            setRegisterField((prevState) => ({
+                ...prevState,
+                isCodeSubmitted: true
+            }));
+
+            if (validationOutcome.reg_code.isInputValid) {
+                const response = await userSignUpConfirmation([email, code]);
+                if (response.success) {
+                    setErrorMsg(prevState => ({
+                        ...prevState,
+                        [type]: ''
+                    }));
+                    loginField.email = registerField.email;
+                    loginField.password = registerField.password;
+                    validationOutcome.log_email = InputChecker("Email", [registerField.email]);
+                    validationOutcome.log_password = InputChecker("Password", [registerField.password]);
+
+                    // Trigger Login when confirmation done
+                    handleLogin(e);
+                } else {
+                    customMsg = response.message;
+                }
+            }
+
+        } else if (type === 'forgot') { // Reset Password Confirmation
+            const { email, code, password } = forgotField;
+            setForgotField(prevState => ({
+                ...prevState,
+                isResetSubmitted: true
+            }));
+            const validCount = handleValidCounter('fgt');
+            if (validCount === 3) {
+                const response = await userResetPasswordConfirmation([email, code, password]);
+                if (!response.success) {
+                    customMsg = response.message;
+                } else {
+                    setErrorMsg(prevState => ({
+                        ...prevState,
+                        [type]: ''
+                    }));
+                    loginField.email = forgotField.email;
+                    loginField.password = forgotField.password;
+                    validationOutcome.log_email = InputChecker("Email", [forgotField.email]);
+                    validationOutcome.log_password = InputChecker("Password", [forgotField.password]);
+                    // Trigger Login when confirmation done
+                    handleLogin(e);
+                }
+            }
+        }
+        if (customMsg !== '' && customMsg !== null && customMsg !== undefined) {
+            setErrorMsg(prevState => ({
+                ...prevState,
+                [type]: customMsg
+            }));
+        }
+    }
+
+    const handleResendCode = async (e, type) => {
+        e.preventDefault();
+        let email = '';
+        let customMsg = '';
+        if (type === 'register') {
+            email = registerField.email;
+        } else if (type === 'forgot') {
+            email = forgotField.email;
+        }
+        const response = await resendCode([email], type);
+        if (!response.success) {
+            customMsg = response.message;
+        } else {
+            setErrorMsg(prevState => ({
+                ...prevState,
+                forgot: ''
+            }));
+        }
+
+        if (customMsg !== '' && customMsg !== null && customMsg !== undefined) {
+            setErrorMsg(prevState => ({
+                ...prevState,
+                [type]: customMsg
+            }));
+        }
+    }
+
+    // Step 3: TOTP Setup / Verification
+    const handleTOTP = async (e) => {
+        e.preventDefault();
+
+        setLoginField(prevState => ({
+            ...prevState,
+            isTOTPSubmitted: true
+        }));
+        if (validationOutcome.log_code.isInputValid) {
+            const response = await userSignInConfirmation([loginField.code], loginField.nextStep);
+            if (response.success) {
+                setErrorMsg(prevState => ({
+                    ...prevState,
+                    login: ''
+                }));
+
+                authProps.handleCreateSession();
+            } else {
+                setErrorMsg(prevState => ({
+                    ...prevState,
+                    login: response.message
+                }));
+
+                authProps.handleClearSession();
+            }
+        }
+    }
+
+    // Step 4: Forgot Password
+    const handleForgotPassword = async (e) => {
+        e.preventDefault();
+
+        // Clear Register + Login Fields
+        handleClearFields(['register', 'login']);
+
+        setForgotField((prevState) => ({
+            ...prevState,
+            isFormSubmitted: true
+        }));
+        let customMsg = '';
+        if (validationOutcome.fgt_email.isInputValid) {
+            const response = await userResetPassword([forgotField.email], false);
+            if (!response.success) {
+                customMsg = response.message;
+            } else {
+                // Go to Password Reset
+                handleLandingNav('confirmation');
+            }
+        }
+        if (customMsg !== '' && customMsg !== null && customMsg !== undefined) {
+            setErrorMsg(prevState => ({
+                ...prevState,
+                forgot: customMsg
+            }));
+        }
+    }
+
     // Change input fields
-    const handleInputChange = (type, e) => {
+    const handleInputChange = (e, type) => {
         e.preventDefault();
         const { name, value } = e.target;
 
@@ -92,143 +346,39 @@ const Landing = () => {
         }
     }
 
-    // Step 1: Registration
-    const handleRegister = (e) => {
-        e.preventDefault();
-
-        // Clear Login Field
-        setLoginField({
-            email: '',
-            password: '',
-            errorMsg: '',
-            isSubmitted: false
+    // Valid field counter
+    const handleValidCounter = (keyPrefix) => {
+        let count = 0;
+        let validationKeys = Object.keys(validationOutcome);
+        validationKeys.forEach(key => {
+            if (key.startsWith(`${keyPrefix}_`) && validationOutcome[key].isInputValid) {
+                count++;
+            }
         });
-
-        console.log(registerField);
-
-        setRegisterField((prevState) => ({
-            ...prevState,
-            isSubmitted: true
-        }))
-        // Go to Account Confirmation
-        handleLandingNav('confirmation');
+        return count;
     }
 
-    // Step 1: Login
-    const handleLogin = (e) => {
-        e.preventDefault();
+    // Clear other fields
+    const handleClearFields = (fields) => {
+        let fieldState = {};
+        fields.forEach(field => {
+            if (field === 'register') {
+                fieldState = registerField;
+            } else if (field === 'login') {
+                fieldState = loginField;
+            } else if (field === 'forgot') {
+                fieldState = forgotField;
+            }
 
-        // Clear Register Field
-        setRegisterField({
-            email: '',
-            password: '',
-            role: '',
-            confirmPassword: '',
-            errorMsg: '',
-            isSubmitted: false
-        });
-
-        console.log(loginField)
-
-        setLoginField((prevState) => ({
-            ...prevState,
-            isSubmitted: true
-        }))
-        // Go to Verify MFA
-        handleLandingNav('mfa');
-    }
-
-    // Step 2: Confirmation
-    const handleConfirmation = (type, e) => {
-        e.preventDefault();
-        if (type === 'register') { // [1] Account Confirmation
-            const { email, code } = registerField;
-
-            // Go to Setup MFA
-            handleLandingNav('mfa');
-
-        } else if (type === 'forgot') { // [5] Email Confirmation
-            const { email, code } = forgotField;
-
-            // Enable page to update to Reset Password
-            setForgotField((prevState) => ({
-                ...prevState,
-                isCodeSubmitted: true
-            }));
-
-            // Go to Forgot Password
-            handleLandingNav('forgot');
-        }
-    }
-
-    const handleResendCode = (e) => {
-        
-    }
-
-    // Step 3: MFA Setup / Verification
-    const handleMFA = (type, e) => {
-        e.preventDefault();
-
-        if (type === 'setup') {
-            // Go to Setup Profile
-            handleLandingNav('profile');
-        } else if (type === 'verify') {
-            // Navigate to Home Page
-            navigate('/home');
-        }
-    }
-
-    // Step 4: Profile Setup
-    const handleProfileSetup = (e, type) => {
-        e.preventDefault();
-
-        if (type === 'confirm'){
-
-        }
-
-        // Login Action
-        setLoginField({
-            email: registerField.email,
-            password: registerField.password,
-            isSubmitted: true
-        });
-
-        // Clear Register Field
-        setRegisterField({
-            email: '',
-            password: '',
-            role: '',
-            confirmPassword: '',
-            errorMsg: '',
-            isSubmitted: false
-        });
-
-        handleLandingNav('mfa');
-    }
-
-    // Step 5: Forgot Password
-    const handleForgotPassword = (e) => {
-        e.preventDefault();
-        const { isCodeSubmitted } = forgotField;
-
-        // Reset Password Page
-        if (isCodeSubmitted) {
-            setForgotField((prevState) => ({
-                ...prevState,
-                isSubmitted: true
-            }));
-            // Go to Verify MFA
-            handleLandingNav('mfa');
-        }
-        // Verify Email Page
-        else {
-            setForgotField((prevState) => ({
-                ...prevState,
-                isEmailSubmitted: true
-            }));
-            // Go to Email Confirmation
-            handleLandingNav('confirmation');
-        }
+            let fieldKeys = Object.keys(fieldState);
+            fieldKeys.forEach(key => {
+                if (key.startsWith('is')) {
+                    fieldState[key] = false;
+                } else {
+                    fieldState[key] = '';
+                }
+            })
+        })
     }
 
     // Password Visibility Toggling
@@ -237,11 +387,6 @@ const Landing = () => {
             ...prevState,
             [type]: !prevState[type]
         }));
-    }
-
-    // Checks if register / login / forgot has been submitted and if any error message returned
-    const handleValidationError = (obj) => {
-        return Object.keys(obj).length !== 0 && (registerField.isSubmitted || loginField.isSubmitted || forgotField.isSubmitted);
     }
 
     // Register Form: Select Role (Staff, Student)
@@ -261,23 +406,16 @@ const Landing = () => {
             case 'confirmation':
                 setStep(2);
                 break;
-            case 'mfa':
+            case 'totp':
                 setStep(3);
                 break;
-            case 'profile':
-                setStep(4);
-                break;
             case 'forgot':
-                setStep(5);
+                setStep(4);
                 break;
             default:
                 setStep(1);
         }
     }
-
-    useEffect(() => {
-    }, [])
-
 
     return (
         <>
@@ -288,6 +426,9 @@ const Landing = () => {
                         <span>Fill up the form below to get started with registration</span>
                     </div>
                     <div className='roleSelect' style={{ display: 'flex', flexDirection: 'column' }}>
+                        {errorMsg.register !== "" &&
+                            <span style={{ color: "red" }}>{errorMsg.register}</span>
+                        }
                         <span>Choose to register as either <span style={{ fontWeight: 600 }}>Staff</span> or <span style={{ fontWeight: 600 }}>Student</span>:</span>
                         <div className='roleButtons'>
                             <Button variant={registerField.role === 'staff' ? 'contained' : 'outlined'} disableElevation
@@ -304,16 +445,16 @@ const Landing = () => {
                             name='email'
                             type='email'
                             value={registerField.email}
-                            onChange={(e) => handleInputChange('register', e)}
-                            error={handleValidationError(validationOutcome.reg_email)}
-                            helperText={validationOutcome.reg_email.message}
+                            onChange={(e) => handleInputChange(e, 'register')}
+                            error={registerField.isFormSubmitted && !validationOutcome.reg_email.isInputValid}
+                            helperText={registerField.isFormSubmitted && validationOutcome.reg_email.message}
                             variant='standard' />
-                        <FormControl required error={handleValidationError(validationOutcome.reg_password)} variant='standard'>
+                        <FormControl required error={registerField.isFormSubmitted && !validationOutcome.reg_password.isInputValid} variant='standard'>
                             <InputLabel>Password</InputLabel>
                             <Input
                                 name='password'
                                 type={showPassword.register ? 'text' : 'password'}
-                                onChange={(e) => handleInputChange('register', e)}
+                                onChange={(e) => handleInputChange(e, 'register')}
                                 value={registerField.password}
                                 endAdornment={
                                     <InputAdornment position="end">
@@ -323,45 +464,48 @@ const Landing = () => {
                                         </IconButton>
                                     </InputAdornment>
                                 } />
-                            <FormHelperText>{validationOutcome.reg_password.message}</FormHelperText>
+                            <FormHelperText>{registerField.isFormSubmitted && validationOutcome.reg_password.message}</FormHelperText>
                         </FormControl>
-                        <FormControl required error={handleValidationError(validationOutcome.reg_password)} variant='standard'>
+                        <FormControl required error={registerField.isFormSubmitted && !validationOutcome.reg_password.isInputValid} variant='standard'>
                             <InputLabel>Confirm password</InputLabel>
                             <Input
                                 name='confirmPassword'
                                 type={showPassword.confirm ? 'text' : 'password'}
-                                onChange={(e) => handleInputChange('register', e)}
+                                onChange={(e) => handleInputChange(e, 'register')}
                                 value={registerField.confirmPassword}
                                 endAdornment={
                                     <InputAdornment position="end">
                                         <IconButton
-                                            onClick={() => handleClickShowPassword('confirm')}>
+                                            onClick={() => handleClickShowPassword('registerConfirm')}>
                                             {showPassword.confirm ? <VisibilityOff /> : <Visibility />}
                                         </IconButton>
                                     </InputAdornment>
                                 } />
-                            <FormHelperText>{validationOutcome.reg_password.message}</FormHelperText>
+                            <FormHelperText>{registerField.isFormSubmitted && validationOutcome.reg_password.message}</FormHelperText>
                         </FormControl>
                         <Button type='submit' onClick={(e) => handleRegister(e)} variant='outlined'>Register</Button>
                     </div>
                     <hr />
                     <div className='loginBox' style={{ display: 'flex', flexDirection: 'column' }}>
                         <h3>Have an account already?</h3>
+                        {errorMsg.login !== "" &&
+                            <span style={{ color: "red" }}>{errorMsg.login}</span>
+                        }
                         <TextField required
                             label='Email address'
                             name='email'
                             type='email'
-                            onChange={(e) => handleInputChange('login', e)}
+                            onChange={(e) => handleInputChange(e, 'login')}
                             value={loginField.email}
-                            error={handleValidationError(validationOutcome.log_email)}
-                            helperText={validationOutcome.log_email.message}
+                            error={loginField.isFormSubmitted && !validationOutcome.log_email.isInputValid}
+                            helperText={loginField.isFormSubmitted && validationOutcome.log_email.message}
                             variant='standard' />
-                        <FormControl required error={handleValidationError(validationOutcome.log_password)} variant='standard'>
+                        <FormControl required error={loginField.isFormSubmitted && !validationOutcome.log_password.isInputValid} variant='standard'>
                             <InputLabel>Password</InputLabel>
                             <Input
                                 name='password'
                                 type={showPassword.login ? 'text' : 'password'}
-                                onChange={(e) => handleInputChange('login', e)}
+                                onChange={(e) => handleInputChange(e, 'login')}
                                 value={loginField.password}
                                 endAdornment={
                                     <InputAdornment position="end">
@@ -371,226 +515,149 @@ const Landing = () => {
                                         </IconButton>
                                     </InputAdornment>
                                 } />
-                            <FormHelperText>{validationOutcome.log_password.message}</FormHelperText>
+                            <FormHelperText>{loginField.isFormSubmitted && validationOutcome.log_password.message}</FormHelperText>
                         </FormControl>
                         <span onClick={() => handleLandingNav('forgot')}>Forgot Password?</span>
                         <Button type='submit' onClick={(e) => handleLogin(e)} variant='outlined'>Login</Button>
                     </div>
                 </>
-                : step === 2 && (registerField.isSubmitted || forgotField.isEmailSubmitted) ?
+                : step === 2 && (registerField.isFormSubmitted || forgotField.isFormSubmitted) ?
                     <>
                         <div className='header' style={{ display: 'flex', flexDirection: 'column' }}>
                             <h2>We Emailed You</h2>
                             <span>Your code is on the way. It may take a minute to arrive.</span>
-                            <span>{registerField.isSubmitted ? <span>To register your account,</span> : forgotField.isEmailSubmitted && <span>To reset your password,</span>} enter the code we emailed to {registerField.isSubmitted ? registerField.email : forgotField.isEmailSubmitted && forgotField.email}.</span>
+                            <span>{registerField.isFormSubmitted ? <span>To register your account,</span> : forgotField.isFormSubmitted && <span>To reset your password,</span>} enter the code we emailed to {registerField.isFormSubmitted ? registerField.email : forgotField.isFormSubmitted && forgotField.email}.</span>
                         </div>
                         <div className='confirmationBox' style={{ display: 'flex', flexDirection: 'column' }}>
+                            <span style={{ color: 'red' }}>{registerField.isFormSubmitted ? errorMsg.register : forgotField.isFormSubmitted && errorMsg.forgot}</span>
                             <TextField required
                                 label='Confirmation Code'
                                 name='code'
                                 type='text'
-                                onChange={(e) => handleInputChange('register', e)}
-                                value={registerField.isSubmitted ? registerField.code : forgotField.isEmailSubmitted && forgotField.code}
-                                //error={handleValidationError(validationOutcome.log_email)}
-                                // helperText={validationOutcome.log_email.message}
+                                onChange={(e) => {
+                                    registerField.isFormSubmitted ? handleInputChange(e, 'register')
+                                        : forgotField.isFormSubmitted && handleInputChange(e, 'forgot')
+                                }}
+                                value={registerField.isFormSubmitted ? registerField.code : forgotField.isFormSubmitted && forgotField.code}
+                                error={registerField.isCodeSubmitted ? !validationOutcome.reg_code.isInputValid : forgotField.isResetSubmitted && !validationOutcome.fgt_code.isInputValid}
+                                helperText={registerField.isCodeSubmitted ? validationOutcome.reg_code.message : forgotField.isResetSubmitted && validationOutcome.fgt_code.message}
                                 variant='standard' />
-
+                            {
+                                (forgotField.isFormSubmitted && !registerField.isFormSubmitted) &&
+                                <>
+                                    <FormControl required error={forgotField.isResetSubmitted && !validationOutcome.fgt_password.isInputValid} variant='standard'>
+                                        <InputLabel>New Password</InputLabel>
+                                        <Input
+                                            name='password'
+                                            type={showPassword.reset ? 'text' : 'password'}
+                                            onChange={(e) => handleInputChange(e, 'forgot')}
+                                            value={forgotField.password}
+                                            endAdornment={
+                                                <InputAdornment position="end">
+                                                    <IconButton
+                                                        onClick={() => handleClickShowPassword('reset')}>
+                                                        {showPassword.reset ? <VisibilityOff /> : <Visibility />}
+                                                    </IconButton>
+                                                </InputAdornment>
+                                            } />
+                                        <FormHelperText>{forgotField.isResetSubmitted && validationOutcome.fgt_password.message}</FormHelperText>
+                                    </FormControl>
+                                    <FormControl required error={forgotField.isResetSubmitted && !validationOutcome.fgt_password.isInputValid} variant='standard'>
+                                        <InputLabel>Confirm password</InputLabel>
+                                        <Input
+                                            name='confirmPassword'
+                                            type={showPassword.resetConfirm ? 'text' : 'password'}
+                                            onChange={(e) => handleInputChange(e, 'forgot')}
+                                            value={forgotField.confirmPassword}
+                                            endAdornment={
+                                                <InputAdornment position="end">
+                                                    <IconButton
+                                                        onClick={() => handleClickShowPassword('resetConfirm')}>
+                                                        {showPassword.resetConfirm ? <VisibilityOff /> : <Visibility />}
+                                                    </IconButton>
+                                                </InputAdornment>
+                                            } />
+                                        <FormHelperText>{forgotField.isResetSubmitted && validationOutcome.fgt_password.message}</FormHelperText>
+                                    </FormControl>
+                                </>
+                            }
                             <Button variant='outlined'
                                 type='submit'
                                 onClick={(e) => {
-                                    registerField.isSubmitted ?
-                                        handleConfirmation('register', e)
-                                        : forgotField.isEmailSubmitted &&
-                                        handleConfirmation('forgot', e)
-                                }}
-                            >
+                                    registerField.isFormSubmitted ?
+                                        handleConfirmation(e, 'register')
+                                        : forgotField.isFormSubmitted &&
+                                        handleConfirmation(e, 'forgot')
+                                }}>
                                 Confirm
                             </Button>
                             <Button type='submit' variant='text'
-                            >
+                                onClick={(e) => {
+                                    registerField.isFormSubmitted ?
+                                        handleResendCode(e, 'register')
+                                        : forgotField.isFormSubmitted &&
+                                        handleResendCode(e, 'forgot')
+                                }}>
                                 Resend Code
                             </Button>
                         </div>
                     </>
-                    : step === 3 && (registerField.isSubmitted || loginField.isSubmitted || forgotField.isSubmitted) ?
-                        <>
-                            {
-                                (registerField.isSubmitted && !(loginField.isSubmitted || forgotField.isSubmitted)) ?
-                                    <>
-                                        <div className='header' style={{ display: 'flex', flexDirection: 'column' }}>
-                                            <h2>Setup TOTP MFA</h2>
-                                            <span>Scan this QR code with your TOTP app (e.g. Google Authenticator, Authy):</span>
-                                        </div>
-                                        <div className='mfaBox' style={{ display: 'flex', flexDirection: 'column' }}>
-                                            <img src={registerField.qrCodeURL} alt="QR Code" />
-                                            <TextField required
-                                                label='TOTP Code'
-                                                name='code'
-                                                type='text'
-                                                onChange={(e) => handleInputChange('register', e)}
-                                                value={registerField.code}
-                                                //error={handleValidationError(validationOutcome.log_email)}
-                                                // helperText={validationOutcome.log_email.message}
-                                                variant='standard' />
-                                            <Button type='submit' variant='outlined'
-                                                onClick={(e) => handleMFA('setup', e)}>
-                                                Setup
-                                            </Button>
-                                        </div>
-                                    </>
-                                    :
-                                    ((loginField.isSubmitted || forgotField.isSubmitted) && !registerField.isSubmitted) ?
-                                        <>
-                                            <div className='header' style={{ display: 'flex', flexDirection: 'column' }}>
-                                                <h2>Verify TOTP MFA</h2>
-                                                <span>Enter the code from your TOTP app (e.g. Google Authenticator, Authy).</span>
-                                            </div>
-                                            <div className='mfaBox' style={{ display: 'flex', flexDirection: 'column' }}>
-                                                <TextField required
-                                                    label='TOTP Code'
-                                                    name='code'
-                                                    type='text'
-                                                    onChange={(e) => {
-                                                        if (loginField.isSubmitted) {
-                                                            handleInputChange('login', e)
-                                                        } else if (forgotField.isSubmitted) {
-                                                            handleInputChange('forgot', e)
-                                                        }
-                                                    }}
-                                                    value={loginField.isSubmitted ? loginField.code : forgotField.isSubmitted && forgotField.code}
-                                                    //error={handleValidationError(validationOutcome.log_email)}
-                                                    // helperText={validationOutcome.log_email.message}
-                                                    variant='standard' />
-                                                <Button type='submit' variant='outlined'
-                                                    onClick={(e) => handleMFA('verify', e)}>
-                                                    Verify
-                                                </Button>
-                                            </div>
-                                        </>
-                                        :
-                                        <InvalidPage />
-                            }
-
-
-                        </>
-                        : step === 4 ?
+                    : step === 3 ?
+                        loginField.isFormSubmitted ?
                             <>
                                 <div className='header' style={{ display: 'flex', flexDirection: 'column' }}>
-                                    <h2>(Optional) Setup Profile</h2>
-                                    <span>You can update these details later.</span>
+                                    <h2>{loginField.nextStep === 'CONTINUE_SIGN_IN_WITH_TOTP_SETUP' ? 'Setup' : 'Verify'} TOTP MFA</h2>
+                                    <span>{loginField.nextStep === 'CONTINUE_SIGN_IN_WITH_TOTP_SETUP' ? 'Scan this QR code with' : 'Enter the code from'} your TOTP app (e.g. Google Authenticator, Authy):</span>
                                 </div>
-                                <div className='profileBox' style={{ display: 'flex', flexDirection: 'column' }}>
-                                    <div className='nameInputs'>
-                                        <TextField required
-                                            label='First name'
-                                            name='firstName'
-                                            type='text'
-                                            value={registerField.firstName}
-                                            onChange={(e) => handleInputChange('register', e)}
-                                            // error={handleValidationError(validationOutcome.reg_email)}
-                                            // helperText={validationOutcome.reg_email.message}
-                                            variant='standard' />
-                                        <TextField
-                                            label='Last name'
-                                            name='lastName'
-                                            type='text'
-                                            value={registerField.lastName}
-                                            onChange={(e) => handleInputChange('register', e)}
-                                            // error={handleValidationError(validationOutcome.reg_email)}
-                                            // helperText={validationOutcome.reg_email.message}
-                                            variant='standard' />
-                                    </div>
-                                    <div className='displayName' style={{ display: 'flex', flexDirection: 'column' }}>
-                                        <span style={{ fontWeight: 600, fontSize: 18 }}>Displayed Name</span>
-                                        <span>{registerField.firstName} {registerField.lastName}</span>
-                                    </div>
-                                    <FormControlLabel control={<Checkbox defaultChecked />} label="Enable Notifications" />
-                                    <Button variant='outlined'
-                                        type='submit'
-                                        onClick={(e)=> handleProfileSetup(e, 'confirm')}
-                                    >
-                                        Confirm
-                                    </Button>
-                                    <Button type='submit' variant='text'
-                                    onClick={(e)=>handleProfileSetup(e)}
-                                    >
-                                        Skip
+                                <div className='totpBox' style={{ display: 'flex', flexDirection: 'column' }}>
+                                    {
+                                        loginField.nextStep === 'CONTINUE_SIGN_IN_WITH_TOTP_SETUP' &&
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            <QRCodeSVG value={loginField.setupURI} />
+                                        </div>
+                                    }
+                                    <TextField required
+                                        label='TOTP Code'
+                                        name='code'
+                                        type='text'
+                                        onChange={(e) => handleInputChange(e, 'login')}
+                                        value={loginField.code}
+                                        error={loginField.isTOTPSubmitted && !validationOutcome.log_code.isInputValid}
+                                        helperText={loginField.isTOTPSubmitted && validationOutcome.log_code.message}
+                                        variant='standard' />
+                                    <Button type='submit' variant='outlined' onClick={(e) => handleTOTP(e)}>
+                                        {loginField.nextStep === 'CONTINUE_SIGN_IN_WITH_TOTP_SETUP' ? 'Setup' : 'Verify'}
                                     </Button>
                                 </div>
                             </>
-                            : step === 5 ?
-                                <>
-                                    <div className='header' style={{ display: 'flex', flexDirection: 'column' }}>
-                                        <h2>{!forgotField.isCodeSubmitted ? <span>Forgot Password?</span> : <span>Reset Password</span>}</h2>
-                                        {!forgotField.isCodeSubmitted &&
-                                            <span>No worries! Please enter the email address associated with your account.</span>
-                                        }
-                                    </div>
-                                    <div className='forgotBox' style={{ display: 'flex', flexDirection: 'column' }}>
-                                        {!forgotField.isCodeSubmitted ?
-                                            <>
-                                                <TextField required
-                                                    label='Email address'
-                                                    name='email'
-                                                    type='email'
-                                                    value={forgotField.email}
-                                                    onChange={(e) => handleInputChange('forgot', e)}
-                                                    // error={handleValidationError(validationOutcome.reg_email)}
-                                                    // helperText={validationOutcome.reg_email.message}
-                                                    variant='standard' />
-                                                <Button variant='outlined' type='submit'
-                                                    onClick={(e) => handleForgotPassword(e)}
-                                                >
-                                                    Confirm
-                                                </Button>
-                                            </>
-                                            :
-                                            <>
-                                                <FormControl required error={handleValidationError(validationOutcome.reg_password)} variant='standard'>
-                                                    <InputLabel>New Password</InputLabel>
-                                                    <Input
-                                                        name='password'
-                                                        type={showPassword.reset ? 'text' : 'password'}
-                                                        onChange={(e) => handleInputChange('forgot', e)}
-                                                        value={forgotField.password}
-                                                        endAdornment={
-                                                            <InputAdornment position="end">
-                                                                <IconButton
-                                                                    onClick={() => handleClickShowPassword('reset')}>
-                                                                    {showPassword.reset ? <VisibilityOff /> : <Visibility />}
-                                                                </IconButton>
-                                                            </InputAdornment>
-                                                        } />
-                                                    <FormHelperText>{validationOutcome.reg_password.message}</FormHelperText>
-                                                </FormControl>
-                                                <FormControl required error={handleValidationError(validationOutcome.reg_password)} variant='standard'>
-                                                    <InputLabel>Confirm password</InputLabel>
-                                                    <Input
-                                                        name='confirmPassword'
-                                                        type={showPassword.resetConfirm ? 'text' : 'password'}
-                                                        onChange={(e) => handleInputChange('forgot', e)}
-                                                        value={forgotField.confirmPassword}
-                                                        endAdornment={
-                                                            <InputAdornment position="end">
-                                                                <IconButton
-                                                                    onClick={() => handleClickShowPassword('resetConfirm')}>
-                                                                    {showPassword.resetConfirm ? <VisibilityOff /> : <Visibility />}
-                                                                </IconButton>
-                                                            </InputAdornment>
-                                                        } />
-                                                    <FormHelperText>{validationOutcome.reg_password.message}</FormHelperText>
-                                                </FormControl>
-                                                <Button variant='outlined' type='submit'
-                                                    onClick={(e) => handleForgotPassword(e)}
-                                                >
-                                                    Reset
-                                                </Button>
-                                            </>
-                                        }
-                                    </div>
-                                </>
-                                :
-                                <InvalidPage />
+                            :
+                            <InvalidPage />
+                        : step === 4 ?
+                            <>
+                                <div className='header' style={{ display: 'flex', flexDirection: 'column' }}>
+                                    <h2>Forgot Password?</h2>
+                                    <span>No worries! Please enter the email address associated with your account.</span>
+                                </div>
+                                <div className='forgotBox' style={{ display: 'flex', flexDirection: 'column' }}>
+                                    {errorMsg.forgot !== '' &&
+                                        <span style={{ color: 'red' }}>{errorMsg.forgot}</span>
+                                    }
+                                    <TextField required
+                                        label='Email address'
+                                        name='email'
+                                        type='email'
+                                        value={forgotField.email}
+                                        onChange={(e) => handleInputChange(e, 'forgot')}
+                                        error={forgotField.isFormSubmitted && !validationOutcome.fgt_email.isInputValid}
+                                        helperText={forgotField.isFormSubmitted && validationOutcome.fgt_email.message}
+                                        variant='standard' />
+                                    <Button variant='outlined' type='submit' onClick={(e) => handleForgotPassword(e)}>
+                                        Confirm
+                                    </Button>
+                                </div>
+                            </>
+                            :
+                            <InvalidPage />
             }
         </>
     )

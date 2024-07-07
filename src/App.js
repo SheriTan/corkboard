@@ -1,51 +1,118 @@
 import './App.css';
 import { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { fetchAuthSession, getCurrentUser, signOut } from 'aws-amplify/auth';
 
-// pages
+// page components
 import Landing from './components/Landing';
 import Home from './components/dashboard/Home';
 import Follow from './components/dashboard/Follow';
 import Profile from './components/dashboard/Profile';
 
+// misc components
+import Layout from './components/Layout';
+
 // utils
 import SetDocumentTitle from './utils/SetDocumentTitle';
+import authaccRequest from './utils/AxiosHandler';
+import AuthChecker from './utils/AuthChecker';
 
-
-
-export default function App({url}) {
-
+export default function App() {
   const mounted = useRef();
+  const region = process.env.REACT_APP_AWS_REGION;
+
+  const [authenticated, setAuthenticated] = useState(false);
+  const [apiKey, setAPIKey] = useState('');
+  const [jwttoken, setJWTToken] = useState('');
+  const [idtoken, setIDToken] = useState(null);
 
   const titles = {
     '/': 'Welcome to Corkboard',
     '/home': 'Home',
     '/follow': 'Follow',
     '/profile': 'Profile'
+  };
+
+  const handleClearSession = async () => {
+    if (authenticated) {
+      try {
+        const response = await signOut();
+        console.log(response);
+        setAuthenticated(false);
+        setAPIKey('');
+        setJWTToken('');
+        setIDToken(null);
+      } catch (err) {
+        console.error("Error occurred on sign out: ", err);
+      }
+    }
+  }
+
+  const handleCreateSession = async () => {
+    if (!authenticated) {
+      const authSession = await fetchAuthSession();
+      let token = authSession.tokens?.accessToken?.toString();
+      let user = authSession.tokens?.idToken;
+      if (!token) {
+        handleClearSession();
+      } else {
+        setJWTToken(token);
+        setIDToken(user);
+        try {
+          const currentUser = await getCurrentUser();
+          if (currentUser.userId !== '' && currentUser.username !== '' && Object.keys(currentUser.signInDetails) !== 0) {
+            try {
+              const response = await authaccRequest(
+                'GET',
+                `auth?region=${region}&paramName=agw`,
+                { "Authorization": "Bearer " + token }
+              )
+              if (response.parameters[0].name.endsWith('api_key')) {
+                setAPIKey(response.parameters[0].value);
+                setAuthenticated(true);
+              }
+            } catch (err) {
+              console.error('Error occurred in making request: ', err);
+              handleClearSession();
+            }
+          }
+        } catch (authError) {
+          console.error('Unauthenticated user: ', authError);
+          handleClearSession();
+        }
+      }
+    }
+  }
+
+  const authProps = {
+    authenticated, setAuthenticated,
+    apiKey, setAPIKey,
+    jwttoken, setJWTToken,
+    idtoken, setIDToken,
+    handleCreateSession,
+    handleClearSession
   }
 
   useEffect(() => {
-    console.log(mounted.current)
-
-    // if (!mounted.current) {
-    //   console.log(url + `auth?region=${region}&paramName=cognito`)
-    //   mounted.current = true;
-    // }
-
+    if (!mounted.current) {
+      handleCreateSession();
+      mounted.current = true;
+    }
   }, [])
 
   return (
     <Router>
       <SetDocumentTitle titles={titles} />
       <Routes>
-        <Route accessType='public'>
-          <Route path='/' element={<Landing />} />
+        <Route element={<AuthChecker authProps={authProps} authType="public" />}>
+          <Route path='/' element={<Landing authProps={authProps} />} />
         </Route>
-
-        <Route accessType='private'>
-          <Route path='/home' element={<Home />} />
-          <Route path='/follow' element={<Follow />} />
-          <Route path='/profile' element={<Profile />} />
+        <Route element={<AuthChecker authProps={authProps} authType="private" />}>
+          <Route element={<Layout authProps={authProps} />}>
+            <Route path='/home' element={<Home authProps={authProps} />} />
+            <Route path='/follow' element={<Follow authProps={authProps} />} />
+            <Route path='/profile' element={<Profile authProps={authProps} />} />
+          </Route>
         </Route>
       </Routes>
     </Router>
