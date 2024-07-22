@@ -36,3 +36,14 @@
     transform: rotate(360deg);
   }
 }
+
+.downloadable:hover {
+  color: #2196f3;
+  cursor: pointer;
+}
+
+.clickable {
+  color: #2196f3;
+  cursor: pointer;
+  margin: 10px 0 10px 0;
+}

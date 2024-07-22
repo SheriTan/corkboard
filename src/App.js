@@ -7,6 +7,7 @@ import { fetchAuthSession, getCurrentUser, signOut } from 'aws-amplify/auth';
 import Landing from './components/Landing';
 import Home from './components/dashboard/Home';
 import Follow from './components/dashboard/Follow';
+import Thread from './components/thread/Thread';
 import Profile from './components/dashboard/Profile';
 
 // misc components
@@ -14,12 +15,11 @@ import Layout from './components/Layout';
 
 // utils
 import SetDocumentTitle from './utils/SetDocumentTitle';
-import authaccRequest from './utils/AxiosHandler';
+import {defaultClientRequest} from './utils/AxiosHandler';
 import AuthChecker from './utils/AuthChecker';
 
 export default function App() {
   const mounted = useRef();
-  const region = process.env.REACT_APP_AWS_REGION;
 
   const [authenticated, setAuthenticated] = useState(false);
   const [apiKey, setAPIKey] = useState('');
@@ -30,14 +30,14 @@ export default function App() {
     '/': 'Welcome to Corkboard',
     '/home': 'Home',
     '/follow': 'Follow',
+    '/thread': 'Thread',
     '/profile': 'Profile'
   };
 
   const handleClearSession = async () => {
     if (authenticated) {
       try {
-        const response = await signOut();
-        console.log(response);
+        await signOut();
         setAuthenticated(false);
         setAPIKey('');
         setJWTToken('');
@@ -62,12 +62,15 @@ export default function App() {
           const currentUser = await getCurrentUser();
           if (currentUser.userId !== '' && currentUser.username !== '' && Object.keys(currentUser.signInDetails) !== 0) {
             try {
-              const response = await authaccRequest(
+              const response = await defaultClientRequest(
                 'GET',
-                `auth?region=${region}&paramName=agw`,
-                { "Authorization": "Bearer " + token }
+                `auth?param=agw`,
+                {
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer " + token
+                }
               )
-              if (response.parameters[0].name.endsWith('api_key')) {
+              if (response.parameters[0].name.endsWith('api-key')) {
                 setAPIKey(response.parameters[0].value);
                 setAuthenticated(true);
               }
@@ -111,6 +114,7 @@ export default function App() {
           <Route element={<Layout authProps={authProps} />}>
             <Route path='/home' element={<Home authProps={authProps} />} />
             <Route path='/follow' element={<Follow authProps={authProps} />} />
+            <Route path='/thread/:id' element={<Thread authProps={authProps} />} />
             <Route path='/profile' element={<Profile authProps={authProps} />} />
           </Route>
         </Route>

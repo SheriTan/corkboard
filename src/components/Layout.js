@@ -4,7 +4,9 @@ export default function Layout({ authProps }) {
     return (
         <div style={{ display: 'flex' }}>
             <Menu authProps={authProps} />
-            <Outlet />
+            <div style={{ paddingLeft: '100px' }}>
+                <Outlet />
+            </div>
         </div>
     )
 }

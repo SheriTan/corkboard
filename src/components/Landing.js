@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Button, TextField, FormControl, Input, InputAdornment, IconButton, InputLabel, FormHelperText } from '@mui/material';
+import { Button, TextField, FormControl, Input, InputAdornment, IconButton, InputLabel, FormHelperText, Alert } from '@mui/material';
 import { Visibility, VisibilityOff } from '@mui/icons-material';
 import { InputChecker } from '../utils/InputChecker';
 import { resendCode, userResetPassword, userResetPasswordConfirmation, userSignIn, userSignInConfirmation, userSignUp, userSignUpConfirmation } from '../utils/AmplifyHandler';
@@ -289,7 +289,6 @@ const Landing = ({ authProps }) => {
                     login: response.message
                 }));
 
-                authProps.handleClearSession();
             }
         }
     }
@@ -422,19 +421,19 @@ const Landing = ({ authProps }) => {
             {step === 1 ?
                 <>
                     <div className='header'>
-                        <h2>Welcome to <span style={{ color: 'blue' }}>Corkboard</span>!</h2>
+                        <h2>Welcome to <span style={{ color: '#2196f3' }}>Corkboard</span>!</h2>
                         <span>Fill up the form below to get started with registration</span>
                     </div>
                     <div className='roleSelect' style={{ display: 'flex', flexDirection: 'column' }}>
                         {errorMsg.register !== "" &&
-                            <span style={{ color: "red" }}>{errorMsg.register}</span>
+                            <Alert severity='error'>{errorMsg.register}</Alert>
                         }
                         <span>Choose to register as either <span style={{ fontWeight: 600 }}>Staff</span> or <span style={{ fontWeight: 600 }}>Student</span>:</span>
                         <div className='roleButtons'>
-                            <Button variant={registerField.role === 'staff' ? 'contained' : 'outlined'} disableElevation
+                            <Button color='secondary' variant={registerField.role === 'staff' ? 'contained' : 'outlined'} disableElevation
                                 name='staff'
                                 onClick={(e) => handleRoleSetting(e)}>Staff</Button>
-                            <Button variant={registerField.role === 'student' ? 'contained' : 'outlined'} disableElevation
+                            <Button color='error' variant={registerField.role === 'student' ? 'contained' : 'outlined'} disableElevation
                                 name='student'
                                 onClick={(e) => handleRoleSetting(e)}>Student</Button>
                         </div>
@@ -470,14 +469,14 @@ const Landing = ({ authProps }) => {
                             <InputLabel>Confirm password</InputLabel>
                             <Input
                                 name='confirmPassword'
-                                type={showPassword.confirm ? 'text' : 'password'}
+                                type={showPassword.registerConfirm ? 'text' : 'password'}
                                 onChange={(e) => handleInputChange(e, 'register')}
                                 value={registerField.confirmPassword}
                                 endAdornment={
                                     <InputAdornment position="end">
                                         <IconButton
                                             onClick={() => handleClickShowPassword('registerConfirm')}>
-                                            {showPassword.confirm ? <VisibilityOff /> : <Visibility />}
+                                            {showPassword.registerConfirm ? <VisibilityOff /> : <Visibility />}
                                         </IconButton>
                                     </InputAdornment>
                                 } />
@@ -489,7 +488,7 @@ const Landing = ({ authProps }) => {
                     <div className='loginBox' style={{ display: 'flex', flexDirection: 'column' }}>
                         <h3>Have an account already?</h3>
                         {errorMsg.login !== "" &&
-                            <span style={{ color: "red" }}>{errorMsg.login}</span>
+                            <Alert severity='error'>{errorMsg.login}</Alert>
                         }
                         <TextField required
                             label='Email address'
@@ -517,7 +516,7 @@ const Landing = ({ authProps }) => {
                                 } />
                             <FormHelperText>{loginField.isFormSubmitted && validationOutcome.log_password.message}</FormHelperText>
                         </FormControl>
-                        <span onClick={() => handleLandingNav('forgot')}>Forgot Password?</span>
+                        <span className='clickable' style={{color: 'inherit'}} onClick={() => handleLandingNav('forgot')}>Forgot Password?</span>
                         <Button type='submit' onClick={(e) => handleLogin(e)} variant='outlined'>Login</Button>
                     </div>
                 </>
@@ -525,11 +524,25 @@ const Landing = ({ authProps }) => {
                     <>
                         <div className='header' style={{ display: 'flex', flexDirection: 'column' }}>
                             <h2>We Emailed You</h2>
-                            <span>Your code is on the way. It may take a minute to arrive.</span>
-                            <span>{registerField.isFormSubmitted ? <span>To register your account,</span> : forgotField.isFormSubmitted && <span>To reset your password,</span>} enter the code we emailed to {registerField.isFormSubmitted ? registerField.email : forgotField.isFormSubmitted && forgotField.email}.</span>
+                            <span>Your code {registerField.isFormSubmitted ? "and verification link are" : forgotField.isFormSubmitted && "is"}  on the way. It may take a minute to arrive.</span>
+                            {registerField.isFormSubmitted ?
+                                <>
+                                    <span>To register your account, kindly fulfill the following steps that we emailed to {registerField.email}:</span>
+                                    <ol type='1'>
+                                        <li>Enter the code from email subject: <b>Corkboard Confirmation Code</b></li>
+                                        <li>(Optional) Click on the subscription link from email subject: <b>AWS Notification - Subscription Confirmation</b></li>
+                                    </ol>
+                                </>
+                                : forgotField.isFormSubmitted &&
+                                <span>To reset your password, enter the code we emailed to {forgotField.email}.</span>
+                            }
                         </div>
                         <div className='confirmationBox' style={{ display: 'flex', flexDirection: 'column' }}>
-                            <span style={{ color: 'red' }}>{registerField.isFormSubmitted ? errorMsg.register : forgotField.isFormSubmitted && errorMsg.forgot}</span>
+                            {
+                                errorMsg.register || errorMsg.forgot !== '' &&
+                                <Alert severity='error'>{registerField.isFormSubmitted ? errorMsg.register : forgotField.isFormSubmitted && errorMsg.forgot}</Alert>
+                            }
+
                             <TextField required
                                 label='Confirmation Code'
                                 name='code'
@@ -607,6 +620,9 @@ const Landing = ({ authProps }) => {
                             <>
                                 <div className='header' style={{ display: 'flex', flexDirection: 'column' }}>
                                     <h2>{loginField.nextStep === 'CONTINUE_SIGN_IN_WITH_TOTP_SETUP' ? 'Setup' : 'Verify'} TOTP MFA</h2>
+                                    {loginField.isTOTPSubmitted && errorMsg.login !== '' &&
+                                    <Alert severity='error'>{errorMsg.login}</Alert>
+                                    }
                                     <span>{loginField.nextStep === 'CONTINUE_SIGN_IN_WITH_TOTP_SETUP' ? 'Scan this QR code with' : 'Enter the code from'} your TOTP app (e.g. Google Authenticator, Authy):</span>
                                 </div>
                                 <div className='totpBox' style={{ display: 'flex', flexDirection: 'column' }}>
@@ -617,6 +633,7 @@ const Landing = ({ authProps }) => {
                                         </div>
                                     }
                                     <TextField required
+                                    sx={{marginTop: '20px', maxWidth: '200px'}}
                                         label='TOTP Code'
                                         name='code'
                                         type='text'
@@ -625,7 +642,7 @@ const Landing = ({ authProps }) => {
                                         error={loginField.isTOTPSubmitted && !validationOutcome.log_code.isInputValid}
                                         helperText={loginField.isTOTPSubmitted && validationOutcome.log_code.message}
                                         variant='standard' />
-                                    <Button type='submit' variant='outlined' onClick={(e) => handleTOTP(e)}>
+                                    <Button sx={{marginTop:'10px', maxWidth: '100px'}} type='submit' variant='outlined' onClick={(e) => handleTOTP(e)}>
                                         {loginField.nextStep === 'CONTINUE_SIGN_IN_WITH_TOTP_SETUP' ? 'Setup' : 'Verify'}
                                     </Button>
                                 </div>
@@ -640,7 +657,7 @@ const Landing = ({ authProps }) => {
                                 </div>
                                 <div className='forgotBox' style={{ display: 'flex', flexDirection: 'column' }}>
                                     {errorMsg.forgot !== '' &&
-                                        <span style={{ color: 'red' }}>{errorMsg.forgot}</span>
+                                        <Alert severity='error'>{errorMsg.forgot}</Alert>
                                     }
                                     <TextField required
                                         label='Email address'

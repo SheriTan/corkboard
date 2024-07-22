@@ -18,6 +18,13 @@ export const InputChecker = (inputType, inputList) => {
                     checkerOutcome.doesInputExist = true;
                 }
                 break;
+            case "File":
+                if (!inputList.name || inputList.name === "" || !inputList.type || inputList.type === "") {
+                    checkerOutcome.message = 'Filename / extension cannot be blank.'
+                } else {
+                    checkerOutcome.doesInputExist = true;
+                }
+                break;
             default:
                 for (var i = 0; i < inputList.length; i++) {
                     if (!inputList[i] || inputList[i] === "") {
@@ -33,12 +40,33 @@ export const InputChecker = (inputType, inputList) => {
             let isInputValid = false;
             let message = '';
             let isMalicious = false;
+            const allowedMIMETypes = {
+                'application/msword': '.doc',
+                'application/pdf': '.pdf',
+                'application/vnd.ms-excel': '.xls',
+                'application/vnd.ms-powerpoint': '.ppt',
+                'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+                'application/x-zip-compressed': '.zip',
+                'application/zip': '.zip',
+                'image/jpeg': ['.jpg', '.jpeg'],
+                'image/png': '.png',
+                'text/plain': '.txt',
+                'video/mp4': '.mp4',
+            };
 
-            for (var i = 0; i < inputList.length; i++) {
-                let input = inputList[i].trim();
-                if (/[\<\>\"\'\&]/gi.test(input)) {
+
+            if (inputType === 'File') {
+                if (/[\<\>\"\'\;\|\%\{\}]/gi.test(inputList.name) || /[\<\>\"\'\;\|\%\{\}]/gi.test(inputList.type)) {
                     isMalicious = true;
-                    message = 'Potentially malicious input detected.';
+                }
+            } else {
+                for (var i = 0; i < inputList.length; i++) {
+                    let input = inputList[i].trim();
+                    if (/[\<\>\"\'\;\|\%\{\}]/gi.test(input)) {
+                        isMalicious = true;
+                    }
                 }
             }
 
@@ -90,7 +118,37 @@ export const InputChecker = (inputType, inputList) => {
                             message = 'Your code should be 6 digits long.';
                         }
                         break;
+                    case "Content":
+                        if (inputList[0].length > 500) {
+                            message = 'You cannot exceed more than 500 characters.'
+                        } else {
+                            isInputValid = true;
+                        }
+                        break;
+                    case "File":
+                        let count = 0;
+                        if (/^(?!^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$)(?!.*[<>:"/\\|?*\x00-\x1F]).*$/.test(inputList.name)) {
+                            count++;
+                            if (Object.keys(allowedMIMETypes).includes(inputList.type)) {
+                                count++;
+                                if (inputList.size <= 1048576) {
+                                    count++;
+                                } else {
+                                    message = 'Your file is too big. Please upload a file <= 1MB.'
+                                }
+                            } else {
+                                message = 'Your file extension is not allowed.'
+                            }
+                        } else {
+                            message = 'Your filename contains illegal / reserved characters.';
+                        }
+                        if (count === 3) {
+                            isInputValid = true;
+                        }
+                        break;
                 }
+            } else {
+                message = 'Potential malicious input detected.';
             }
             checkerOutcome = {
                 isInputValid: isInputValid,

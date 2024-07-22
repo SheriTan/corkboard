@@ -39,12 +39,14 @@ export default function Menu({ authProps }) {
     }, [location]);
 
     return (
-        <div className="navbar" style={{ backgroundColor: 'red', height: '100vh', width: '60px', display: "inline-flex", flexDirection: 'column', alignItems: 'center' }}>
+        <div className="navbar" style={{ 
+            background: 'linear-gradient(45deg, #70E4EF, #F038FF)',  height: '100vh', width: '60px', display: "inline-flex", flexDirection: 'column', alignItems: 'center',
+            position:'fixed', top: 0}}>
             {navItems.map((item, index) => {
                 if (index !== navItems.length - 1) {
                     return (
                         <Link to={item.to} key={index}>
-                            <div className={`menu_item_box ${activeItem === index ? 'active' : ''}`}>
+                            <div style={{marginTop: '8px'}} className={`menu_item_box ${activeItem === index ? 'active' : ''}`}>
                                 {activeItem === index ? item.active : item.default}
                             </div>
                         </Link>

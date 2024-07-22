@@ -1,4 +1,5 @@
 import { signUp, confirmSignUp, signIn, confirmSignIn, resendSignUpCode, resetPassword, updatePassword, confirmResetPassword, updateUserAttributes, updateMFAPreference } from "aws-amplify/auth";
+import { defaultClientRequest } from "./AxiosHandler";
 
 // Register - Sign Up
 export const userSignUp = async (InputList) => {
@@ -19,6 +20,14 @@ export const userSignUp = async (InputList) => {
                 }
             }
         })
+
+        await defaultClientRequest(
+            'POST',
+            'auth',
+            {},
+            {email: InputList[0]}
+        );
+
         return { success: true, body };
     } catch (cognitoError) {
         return { success: false, message: cognitoError.message };
@@ -47,6 +56,7 @@ export const userSignIn = async (InputList) => {
             username: InputList[0],
             password: InputList[1]
         });
+
         return { success: true, body };
     } catch (cognitoError) {
         return { success: false, message: cognitoError.message };
@@ -60,7 +70,7 @@ export const userSignInConfirmation = async (InputList, nextStep) => {
         const first = await confirmSignIn({
             challengeResponse: InputList[0]
         });
-        let returnObj = {success: true, first}
+        let returnObj = { success: true, first }
         if (nextStep === 'CONTINUE_SIGN_IN_WITH_TOTP_SETUP') {
             const final = await updateMFAPreference({
                 totp: 'ENABLED'
@@ -137,33 +147,3 @@ export const resendCode = async (InputList, type) => {
         }
     }
 }
-
-// Profile - General Updates
-export const userProfileUpdate = async (InputList, authenticated) => {
-    // 0: name, 1: authNotif, 2: commentNotif, 3: documentNotif, 4: threadNotif
-    let updateObj = {
-        name: InputList[0]
-    }
-    if (authenticated) {
-        const keys = ['authNotif', 'commentNotif', 'documentNotif', 'threadNotif'];
-
-        keys.forEach((key, i) => {
-            if (key.endsWith('Notif')) {
-                updateObj[`custom:${key}`] = InputList[i + 1];
-            } else {
-                updateObj[key] = InputList[i + 1];
-            }
-        })
-    }
-
-    try {
-        const body = await updateUserAttributes({
-            userAttributes: updateObj
-        });
-        return { success: true, body };
-    } catch (cognitoError) {
-        return { success: false, message: cognitoError.message };
-    }
-}
-
-// Profile - Update confirmation (if needed)
